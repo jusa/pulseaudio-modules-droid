@@ -74,6 +74,7 @@ enum pa_droid_option_type {
     DM_OPTION_SPEAKER_BEFORE_VOICE,
     DM_OPTION_OUTPUT_VOIP_RX,
     DM_OPTION_RECORD_VOICE_16K,
+    DM_OPTION_VOICE_PARAMETERS_LATER,
     DM_OPTION_COUNT
 };
 
@@ -109,6 +110,8 @@ struct pa_droid_hw_module {
     pa_atomic_t active_outputs;
 
     pa_droid_options options;
+
+    dm_list *set_parameters_pending; /* char *key_value_pair */
 
     /* Mode and input control */
     struct _state {

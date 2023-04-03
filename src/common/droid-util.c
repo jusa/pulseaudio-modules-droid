@@ -91,6 +91,7 @@ struct droid_option valid_options[] = {
     { "speaker_before_voice",   DM_OPTION_SPEAKER_BEFORE_VOICE  },
     { "output_voip_rx",         DM_OPTION_OUTPUT_VOIP_RX        },
     { "record_voice_16k",       DM_OPTION_RECORD_VOICE_16K      },
+    { "voice_parameters_later", DM_OPTION_VOICE_PARAMETERS_LATER},
 };
 
 struct user_options {
@@ -876,7 +877,24 @@ static int droid_set_parameters_v1_cb(void *handle, const char *key_value_pairs)
     pa_log_debug(DROID_SET_PARAMETERS_V1 "(\"%s\")", key_value_pairs);
 
     pa_droid_hw_module_lock(hw);
-    ret = hw->device->set_parameters(hw->device, key_value_pairs);
+    if (pa_droid_option(hw, DM_OPTION_VOICE_PARAMETERS_LATER) &&
+        strstr(key_value_pairs, "call_state=2") && hw->state.mode != AUDIO_MODE_IN_CALL) {
+        bool add = true;
+        if (dm_list_size(hw->set_parameters_pending) > 0) {
+            const char *prev;
+            void *state;
+            prev = dm_list_first_data(hw->set_parameters_pending, &state);
+            if (pa_streq(prev, key_value_pairs))
+                add = false;
+        }
+        if (add) {
+            pa_log_debug("Set parameters call for voicecall received before in voicecall mode, storing.");
+            dm_list_push_back(hw->set_parameters_pending, pa_xstrdup(key_value_pairs));
+        }
+        ret = 0;
+    } else {
+        ret = hw->device->set_parameters(hw->device, key_value_pairs);
+    }
     pa_droid_hw_module_unlock(hw);
 
     if (ret != 0)
@@ -964,6 +982,7 @@ static pa_droid_hw_module *droid_hw_module_open(pa_core *core, dm_config_device 
     hw->shared_name = shared_name_get(hw->module_id);
     hw->outputs = pa_idxset_new(pa_idxset_trivial_hash_func, pa_idxset_trivial_compare_func);
     hw->inputs = pa_idxset_new(pa_idxset_trivial_hash_func, pa_idxset_trivial_compare_func);
+    hw->set_parameters_pending = dm_list_new();
 
     hw->sink_put_hook_slot      = pa_hook_connect(&core->hooks[PA_CORE_HOOK_SINK_PUT], PA_HOOK_EARLY-10,
                                                   sink_put_hook_cb, hw);
@@ -1103,6 +1122,8 @@ static void droid_hw_module_close(pa_droid_hw_module *hw) {
         pa_assert(pa_idxset_size(hw->inputs) == 0);
         pa_idxset_free(hw->inputs, NULL);
     }
+
+    dm_list_free(hw->set_parameters_pending, pa_xfree);
 
     pa_xfree(hw);
 }
@@ -2456,6 +2477,16 @@ bool pa_droid_hw_set_mode(pa_droid_hw_module *hw_module, audio_mode_t mode) {
             if ((primary_output = pa_droid_hw_primary_output_stream(hw_module)) &&
                 (device_port = dm_config_find_device_port(primary_output->mix_port, AUDIO_DEVICE_OUT_EARPIECE)))
                 pa_droid_stream_set_route(primary_output, device_port);
+
+            if (dm_list_size(hw_module->set_parameters_pending) > 0) {
+                char *key_value_pairs;
+                pa_log_debug("Apply pending set_parameters() calls.");
+                while ((key_value_pairs = dm_list_steal_first(hw_module->set_parameters_pending))) {
+                    int ret = hw_module->device->set_parameters(hw_module->device, key_value_pairs);
+                    pa_log_debug("Apply set_parameters(%s) -> %d", key_value_pairs, ret);
+                    pa_xfree(key_value_pairs);
+                }
+            }
         }
 
         hw_module->state.mode = mode;
