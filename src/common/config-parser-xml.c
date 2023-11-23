@@ -1126,7 +1126,6 @@ static void generate_config_for_module(struct module *module, dm_config_device *
         dm_config_route *c_route = pa_xnew0(dm_config_route, 1);
         dm_config_port *c_port;
         void *state;
-        c_route->sources = dm_list_new();
 
         if (!pa_safe_streq(route->type, "mix"))
             pa_log("Unknown route type %s.", route->type);
@@ -1138,6 +1137,17 @@ static void generate_config_for_module(struct module *module, dm_config_device *
                 break;
             }
         }
+
+        if (!c_route->sink) {
+            pa_log("Route with no matching " ATTRIBUTE_sink " element, with following " ATTRIBUTE_sources);
+            SLLIST_FOREACH(device, route->sources) {
+                pa_log("    %s", device->name);
+            }
+            pa_xfree(
+            continue;
+        }
+
+        c_route->sources = dm_list_new();
 
         SLLIST_FOREACH(device, route->sources) {
             DM_LIST_FOREACH_DATA(c_port, c_module->ports, state) {
