@@ -150,6 +150,9 @@ struct userdata {
 
     pa_modargs *modargs;
     pa_card *card;
+
+    pa_hook_slot *udev_card_added_slot;
+    pa_hook_slot *udev_card_removed_slot;
 };
 
 struct profile_data {
@@ -777,6 +780,86 @@ static int card_set_profile(pa_card *c, pa_card_profile *new_profile) {
     return 0;
 }
 
+static pa_hook_result_t udev_card_added_cb(void *hook_data, void *call_data, void *slot_data) {
+    struct userdata *u = slot_data;
+    pa_modargs *am;
+    pa_device_port *p;
+    void *state;
+
+    pa_assert(u);
+
+    pa_log("card added");
+
+    if (!(am = pa_modargs_new(call_data, NULL))) {
+        pa_log("Could not parse modargs from module-udev-detect");
+        return PA_HOOK_OK;
+    }
+
+    PA_HASHMAP_FOREACH(p, u->card->ports, state) {
+        pa_droid_port_data *data = PA_DEVICE_PORT_DATA(p);
+        dm_config_port *device_port = data->device_port;
+
+        /* Parking port doesn't have device_port */
+        if (!device_port)
+            continue;
+
+        //pa_log("port %s", p->name);
+
+        if (device_port->port_type == DM_CONFIG_TYPE_DEVICE_PORT &&
+            device_port->type == AUDIO_DEVICE_OUT_USB_HEADSET) {
+            pa_log("Found device port %s -> set available", device_port->name);
+
+            pa_log("Connect usb");
+            pa_droid_set_parameters(u->hw_module, "connect=67108864;card=1;device=0");
+
+            pa_device_port_set_available(p, PA_AVAILABLE_YES);
+            break;
+        }
+    }
+
+    return PA_HOOK_OK;
+}
+
+static pa_hook_result_t udev_card_removed_cb(void *hook_data, void *call_data, void *slot_data) {
+    struct userdata *u = slot_data;
+    pa_modargs *am;
+    pa_device_port *p;
+    void *state;
+
+    pa_assert(u);
+
+    pa_log("card removed");
+
+    if (!(am = pa_modargs_new(call_data, NULL))) {
+        pa_log("Could not parse modargs from module-udev-detect");
+        return PA_HOOK_OK;
+    }
+
+    PA_HASHMAP_FOREACH(p, u->card->ports, state) {
+        pa_droid_port_data *data = PA_DEVICE_PORT_DATA(p);
+        dm_config_port *device_port = data->device_port;
+
+        /* Parking port doesn't have device_port */
+        if (!device_port)
+            continue;
+
+        //pa_log("port %s", p->name);
+
+        if (device_port->port_type == DM_CONFIG_TYPE_DEVICE_PORT &&
+            device_port->type == AUDIO_DEVICE_OUT_USB_HEADSET) {
+            pa_log("Found device port %s -> set unavailable", device_port->name);
+
+            pa_log("Disconnect usb");
+            pa_droid_set_parameters(u->hw_module, "disconnect=67108864;card=1;device=0");
+
+            pa_device_port_set_available(p, PA_AVAILABLE_NO);
+            break;
+        }
+    }
+
+    return PA_HOOK_OK;
+}
+
 
 int pa__init(pa_module *m) {
     struct userdata *u = NULL;
@@ -892,6 +975,15 @@ int pa__init(pa_module *m) {
     u->modargs = ma;
     u->module = m;
 
+    u->udev_card_added_slot = pa_hook_connect(&u->core->hooks[PA_CORE_HOOK_UDEV_CARD_ADDED],
+                                              PA_HOOK_NORMAL,
+                                              udev_card_added_cb,
+                                              u);
+    u->udev_card_added_slot = pa_hook_connect(&u->core->hooks[PA_CORE_HOOK_UDEV_CARD_REMOVED],
+                                              PA_HOOK_NORMAL,
+                                              udev_card_removed_cb,
+                                              u);
+
     pa_card_choose_initial_profile(u->card);
     init_profile(u);
     pa_card_put(u->card);
@@ -913,6 +1005,12 @@ void pa__done(pa_module *m) {
     pa_assert(m);
 
     if ((u = m->userdata)) {
+
+        if (u->udev_card_added_slot)
+            pa_hook_slot_free(u->udev_card_added_slot);
+
+        if (u->udev_card_removed_slot)
+            pa_hook_slot_free(u->udev_card_removed_slot);
 
         if (u->card && u->card->sinks)
             pa_idxset_remove_all(u->card->sinks, (pa_free_cb_t) pa_droid_sink_free);

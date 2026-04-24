@@ -1051,6 +1051,14 @@ pa_droid_hw_module *pa_droid_hw_module_get(pa_core *core, dm_config_device *conf
     if (!(hw = droid_hw_module_shared_get(core, module_id)))
         hw = droid_hw_module_open(core, config, module_id, NULL);
 
+
+    //if (device_port->type == AUDIO_DEVICE_OUT_USB_DEVICE || device_port->type == AUDIO_DEVICE_OUT_USB_HEADSET) {
+    //pa_log("Connect usb");
+    //pa_droid_set_parameters(hw, "connect=67108864");
+    //pa_droid_set_parameters(hw, "connect=67108864;card=1;device=0");
+    //}
+
+
     return hw;
 }
 
@@ -1475,6 +1483,8 @@ done:
     return selected_port;
 }
 
+static int audio_patch_update_output(pa_droid_stream *stream, const dm_config_port *device_port);
+
 pa_droid_stream *pa_droid_open_output_stream(pa_droid_hw_module *module,
                                              const pa_sample_spec *spec,
                                              const pa_channel_map *map,
@@ -1487,6 +1497,7 @@ pa_droid_stream *pa_droid_open_output_stream(pa_droid_hw_module *module,
     pa_channel_map channel_map;
     pa_sample_spec sample_spec;
     struct audio_config config_out;
+    dm_config_port *override = NULL;
 
     pa_assert(module);
     pa_assert(spec);
@@ -1511,6 +1522,16 @@ pa_droid_stream *pa_droid_open_output_stream(pa_droid_hw_module *module,
         goto fail;
     }
 
+    if (pa_streq(mix_port->name, "usb_device output")) {
+        override = dm_config_find_device_port(mix_port, AUDIO_DEVICE_OUT_USB_HEADSET);
+        if (override) {
+            device_port = override;
+            pa_log("Open output stream, override usb device_port %s", device_port->name);
+        } else {
+            pa_log("Could not find device port for usb");
+        }
+    }
+
     pa_log_info("Open output stream \"%s\"->\"%s\".", mix_port->name, device_port->name);
 
     if (!stream_config_fill(module, stream->mix_port, device_port, &sample_spec, &channel_map, &config_out))
@@ -1523,7 +1544,7 @@ pa_droid_stream *pa_droid_open_output_stream(pa_droid_hw_module *module,
                                              mix_port->flags,
                                              &config_out,
                                              &output->stream,
-                                             device_port->address);
+                                             override ? "card=1;device=0" : device_port->address);
     pa_droid_hw_module_unlock(module);
 
     if (ret < 0 || !output->stream) {
@@ -1545,8 +1566,12 @@ pa_droid_stream *pa_droid_open_output_stream(pa_droid_hw_module *module,
 
     stream->buffer_size = output->stream->common.get_buffer_size(&output->stream->common);
 
-    if ((primary_stream = pa_droid_hw_primary_output_stream(module))) {
-        pa_droid_stream_set_route(primary_stream, device_port);
+    if (override) {
+        int ret = audio_patch_update_output(stream, device_port);
+    } else {
+        if ((primary_stream = pa_droid_hw_primary_output_stream(module))) {
+            pa_droid_stream_set_route(primary_stream, device_port);
+        }
     }
 
     pa_log_info("Opened droid output stream %p with device: %u flags: %u sample rate: %u channels: %u (%u) format: %u (%u) buffer size: %zu (%" PRIu64 " usec)",
@@ -2104,6 +2129,15 @@ static int audio_patch_update_output(pa_droid_stream *stream, const dm_config_po
     sink.ext.device.address[0] = '\0';
     if (strlen(device_port->address))
         strncpy(sink.ext.device.address, device_port->address, AUDIO_DEVICE_MAX_ADDRESS_LEN);
+
+    if (device_port->type == AUDIO_DEVICE_OUT_USB_DEVICE || device_port->type == AUDIO_DEVICE_OUT_USB_HEADSET) {
+        pa_log("device port shenanigans");
+        static const char *hack = "card=1;device=0";
+        strncpy(sink.ext.device.address, hack, strlen(hack));
+        pa_log("Override usb device address to %s", sink.ext.device.address);
+        //sink.format = AUDIO_FORMAT_PCM_8_24_BIT;
+        //sink.sample_rate = 44100;
+    }
     sink.ext.device.type = device_port->type;
 
     ret = stream->module->device->create_audio_patch(stream->module->device, 1, &source, 1, &sink, &stream->audio_patch);
