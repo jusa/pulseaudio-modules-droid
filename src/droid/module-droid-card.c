@@ -62,6 +62,8 @@
 #include <droid/droid-util.h>
 #include <droid/sllist.h>
 #include <droid/utils.h>
+
+#include "card-accessories.h"
 #include "droid-sink.h"
 #include "droid-source.h"
 
@@ -153,6 +155,8 @@ struct userdata {
 
     pa_hook_slot *udev_card_added_slot;
     pa_hook_slot *udev_card_removed_slot;
+
+    card_accessories *accessories;
 };
 
 struct profile_data {
@@ -987,6 +991,8 @@ int pa__init(pa_module *m) {
     pa_card_choose_initial_profile(u->card);
     init_profile(u);
     pa_card_put(u->card);
+
+    u->accessories = card_accessories_init(u->card);
 
     return 0;
 
