@@ -93,6 +93,7 @@ struct droid_option valid_options[] = {
     { "record_voice_16k",                  DM_OPTION_RECORD_VOICE_16K                  },
     { "use_legacy_stream_set_parameters",  DM_OPTION_USE_LEGACY_STREAM_SET_PARAMETERS  },
     { "usb_devices",                       DM_OPTION_USB_DEVICES                       },
+    { "params_to_stream",                  DM_OPTION_PARAMS_TO_STREAM                  },
 
 };
 

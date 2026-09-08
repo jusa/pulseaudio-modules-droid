@@ -113,6 +113,8 @@ static const char* const valid_modargs[] = {
     "voice_property_key",
     "voice_property_value",
     "voice_virtual_stream",
+    "evdev_device",
+    "evdev_match",
     /* DM_OPTIONS */
     NULL,
 };
@@ -844,6 +846,16 @@ static pa_hook_result_t port_availability_changed_hook_callback(void *hook_data,
     }
     pa_droid_set_parameters(u->hw_module, setparam);
 
+    if (pa_droid_option(u->hw_module, DM_OPTION_PARAMS_TO_STREAM)) {
+        uint32_t idx;
+        pa_droid_stream *stream;
+        pa_idxset *idxset = port->direction == PA_DIRECTION_OUTPUT ? u->hw_module->outputs : u->hw_module->inputs;
+
+        PA_IDXSET_FOREACH(stream, idxset, idx) {
+            pa_droid_stream_set_parameters(stream, setparam);
+        }
+    }
+
     return PA_HOOK_OK;
 }
 
@@ -974,8 +986,11 @@ int pa__init(pa_module *m) {
 
     u->extcon = pa_droid_extcon_new(m->core, u->card);
 
-    if (!u->extcon)
-        u->extevdev = pa_droid_extevdev_new(u->card);
+    if (!u->extcon) {
+        const char *evdev_device = pa_modargs_get_value(ma, "evdev_device", NULL);
+        const char *evdev_match = pa_modargs_get_value(ma, "evdev_match", NULL);
+        u->extevdev = pa_droid_extevdev_new(evdev_device, evdev_match, u->card);
+    }
 
     if (pa_droid_option(u->hw_module, DM_OPTION_USB_DEVICES))
         u->extusbdev = pa_droid_extusbdev_new(u->hw_module, u->card);
